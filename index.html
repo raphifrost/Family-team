@@ -122,6 +122,8 @@ const timeLocale = new Intl.DateTimeFormat('de-DE', { hour: '2-digit', minute: '
 const demoKey = 'redline-demo-v1';
 const teamKey = 'redline-team-selected';
 const notifyKey = 'redline-reminder-fired-v1';
+let pendingJoinCode = /^[a-f0-9]{24}$/i.test(new URLSearchParams(location.search).get('join')||'')?new URLSearchParams(location.search).get('join'):'';
+function teamInviteUrl(){const u=new URL(location.href);u.search='';u.hash='';if(state.mode==='cloud'&&state.team?.invite_code)u.searchParams.set('join',state.team.invite_code);return u.toString();}
 const colorPalette = ['#c73330', '#5b65ad', '#b97035', '#55926c', '#9c509a', '#4c8da2', '#8464ac'];
 const isConfigured = /^https:\/\/[a-z0-9-]+\.supabase\.co\/?$/i.test(SUPABASE_URL) && /^sb_publishable_|^eyJ/.test(SUPABASE_PUBLISHABLE_KEY);
 const state = {
@@ -225,6 +227,7 @@ function renderTeam() {
   $('#team-count-label').textContent=`${String(state.members.length).padStart(2,'0')} AKTIV`;
   $('#team-member-list').innerHTML=state.members.map(m=>`<div class="team-member-row">${avatar(m)}<div><strong>${escapeHTML(m.display_name)}</strong><small>${m.user_id===meId()?'Dein Profil':'Teammitglied'}</small></div><span class="right-tag">${m.user_id===meId()?'DU':'TEAM'}</span></div>`).join('');
   $('#invite-code').textContent=state.team?.invite_code||'—';
+  $('#share-team-link').disabled=state.mode!=='cloud'||!state.team;
   $('#share-hint').textContent=state.mode==='demo'?'Nur Demo auf diesem Gerät. Für gemeinsames Arbeiten ist die Supabase-Verbindung erforderlich.':'Nur an Personen weitergeben, die Zugang zu deinem Team haben sollen.';
 }
 function changeDate(date) { if(Number.isNaN(date.getTime()))return;state.selectedDate=date;render(); }
@@ -339,10 +342,11 @@ function openInviteModal() {
     showModal('Demo-Mitglied hinzufügen','TEAM / DEMO',`<form id="member-form" class="edit-form">${formField('Name',`<input name="name" required maxlength="40" placeholder="Name des Mitglieds" />`)}<p class="small-help">In der Demo werden die Mitglieder nur in deinem eigenen Browser angelegt. Andere Geräte sehen sie nicht.</p><button class="btn btn-primary" type="submit">Hinzufügen ↗</button></form>`);
     $('#member-form').addEventListener('submit',e=>{e.preventDefault();const name=String(new FormData(e.currentTarget).get('name')).trim();if(!name)return;state.members.push({user_id:nextId(),display_name:name,color:colorPalette[state.members.length%colorPalette.length]});saveDemo();render();closeModal();toast('Demo-Mitglied hinzugefügt');});
   } else {
-    showModal('Leute einladen','TEAM / SHARING',`<p class="small-help">Andere Mitglieder öffnen dieselbe Website, melden sich mit ihrer E-Mail an und wählen „Mit Code beitreten“.</p><div class="modal-info-row"><span>Team</span><b>${escapeHTML(state.team?.name)}</b></div><div class="invite-code-row"><span>${escapeHTML(state.team?.invite_code)}</span><button class="copy-btn" id="modal-copy-code">Kopieren</button></div><p class="auth-info">Nur mit Personen teilen, denen du Zugriff auf Termine und Aufgaben erlauben möchtest.</p>`);
-    $('#modal-copy-code').addEventListener('click',()=>copyCode());
+    showModal('Leute einladen','TEAM / SHARING',`<p class="small-help">Andere Mitglieder öffnen dieselbe Website, melden sich mit ihrer E-Mail an und wählen „Mit Code beitreten“.</p><div class="modal-info-row"><span>Team</span><b>${escapeHTML(state.team?.name)}</b></div><div class="invite-code-row"><span>${escapeHTML(state.team?.invite_code)}</span><button class="copy-btn" id="modal-copy-code">Kopieren</button></div><button type="button" id="modal-share-link" class="btn btn-primary">Einladungslink verschicken ↗</button><p class="auth-info">Nur mit Personen teilen, denen du Zugriff auf Termine und Aufgaben erlauben möchtest.</p>`);
+    $('#modal-copy-code').addEventListener('click',()=>copyCode());$('#modal-share-link')?.addEventListener('click',shareTeamLink);
   }
 }
+async function shareTeamLink(){if(state.mode!=='cloud'||!state.team?.invite_code){toast('Erst Team erstellen');return;}const u=teamInviteUrl();if(navigator.share){try{await navigator.share({title:state.team.name+' · REDLINE',text:'Tritt unserem gemeinsamen Kalender bei!',url:u});return;}catch(e){if(e.name==='AbortError')return;}}try{await navigator.clipboard.writeText(u);toast('Team-Einladungslink kopiert');}catch{showModal('Einladungslink','TEAM / SHARING',`<p class="small-help">Diesen Link mit deiner Familie teilen:</p><input readonly onclick="this.select()" value="${escapeHTML(u)}" />`);}}
 async function copyCode() {try{await navigator.clipboard.writeText(state.team?.invite_code||'');toast('Einladungscode kopiert');}catch{toast('Code markieren und manuell kopieren');}}
 function openAccountModal() {
   if(state.mode==='demo') {showModal('Dein Demo-Profil','ACCOUNT / DEMO',`<p class="small-help">Du nutzt gerade REDLINE als lokale Demo. Termine und Aufgaben werden nur auf diesem Gerät gespeichert.</p><form id="rename-demo-form" class="edit-form">${formField('Dein Name',`<input name="name" maxlength="40" required value="${escapeHTML(state.members.find(m=>m.user_id===meId())?.display_name||'Du')}" />`)}<button type="submit" class="btn btn-primary">Namen speichern</button></form><p class="auth-info">Für echtes Teilen und gleichzeitige Bearbeitung musst du einmalig ein eigenes Supabase-Projekt einrichten. Die Anleitung liegt in der README-Datei.</p>`);
@@ -460,7 +464,7 @@ function bindUI() {
   $('#task-board').addEventListener('click',e=>{const advance=e.target.closest('[data-advance-task]');if(advance){advanceTask(advance.dataset.advanceTask);return;}const edit=e.target.closest('[data-edit-task]');if(edit){const task=state.tasks.find(x=>x.id===edit.dataset.editTask);if(task)openTaskModal(task);}});
   $('#task-board').addEventListener('keydown',e=>{if(e.target.matches('[data-edit-task]')&&(e.key==='Enter'||e.key===' ')){e.preventDefault();const task=state.tasks.find(x=>x.id===e.target.dataset.editTask);if(task)openTaskModal(task);}});
   $$('.filter').forEach(el=>el.addEventListener('click',()=>{state.filter=el.dataset.filter;renderTasks();}));
-  $('#invite-member-btn').addEventListener('click',openInviteModal);$('#copy-invite-code').addEventListener('click',copyCode);$('#account-button').addEventListener('click',openAccountModal);
+  $('#invite-member-btn').addEventListener('click',openInviteModal);$('#copy-invite-code').addEventListener('click',copyCode);$('#share-team-link').addEventListener('click',shareTeamLink);$('#account-button').addEventListener('click',openAccountModal);
   $('#notification-button').addEventListener('click',enableNotifications);$('#download-day-ics').addEventListener('click',()=>downloadICS(state.events.filter(e=>dateKey(e.starts_at)===dateKey(state.selectedDate))));
   $('#close-modal-btn').addEventListener('click',closeModal);$('#modal-backdrop').addEventListener('click',e=>{if(e.target.id==='modal-backdrop'&&!(state.mode==='cloud'&&!state.user))closeModal();});
   window.addEventListener('keydown',e=>{if(e.key==='Escape'&&!(state.mode==='cloud'&&!state.user))closeModal();});
