@@ -348,12 +348,41 @@ function openAccountModal() {
   if(state.mode==='demo') {showModal('Dein Demo-Profil','ACCOUNT / DEMO',`<p class="small-help">Du nutzt gerade REDLINE als lokale Demo. Termine und Aufgaben werden nur auf diesem Gerät gespeichert.</p><form id="rename-demo-form" class="edit-form">${formField('Dein Name',`<input name="name" maxlength="40" required value="${escapeHTML(state.members.find(m=>m.user_id===meId())?.display_name||'Du')}" />`)}<button type="submit" class="btn btn-primary">Namen speichern</button></form><p class="auth-info">Für echtes Teilen und gleichzeitige Bearbeitung musst du einmalig ein eigenes Supabase-Projekt einrichten. Die Anleitung liegt in der README-Datei.</p>`);
     $('#rename-demo-form').addEventListener('submit',e=>{e.preventDefault();const name=String(new FormData(e.currentTarget).get('name')).trim();if(!name)return;const m=state.members.find(m=>m.user_id===meId());if(m)m.display_name=name;saveDemo();render();closeModal();});return;
   }
-  showModal('Mein Account','ACCOUNT / ONLINE',`<div class="edit-form"><div class="modal-info-row"><span>E-Mail</span><b>${escapeHTML(state.user?.email||'')}</b></div><div class="modal-info-row"><span>Aktives Team</span><b>${escapeHTML(state.team?.name||'–')}</b></div><button id="switch-team" class="btn btn-secondary">Team wechseln / beitreten</button><button id="rename-online" class="btn btn-secondary">Meinen Namen bearbeiten</button><button id="logout" class="btn btn-primary">Abmelden ↗</button></div>`);
+  showModal('Mein Account','ACCOUNT / ONLINE',`<div class="edit-form"><div class="modal-info-row"><span>E-Mail</span><b>${escapeHTML(state.user?.email||'')}</b></div><div class="modal-info-row"><span>Aktives Team</span><b>${escapeHTML(state.team?.name||'–')}</b></div><button id="switch-team" class="btn btn-secondary">Team wechseln / beitreten</button><button id="rename-online" class="btn btn-secondary">Meinen Namen bearbeiten</button><button id="import-offline" class="btn btn-secondary">Alte Demo-Termine übernehmen</button><button id="logout" class="btn btn-primary">Abmelden ↗</button></div>`);
   $('#logout').addEventListener('click',async()=>{await state.client.auth.signOut();state.user=null;state.team=null;state.members=[];state.events=[];state.tasks=[];render();openLogin();});
   $('#switch-team').addEventListener('click',()=>openTeamChoice());
-  $('#rename-online').addEventListener('click',()=>openRenameOnline());
+  $('#rename-online').addEventListener('click',()=>openRenameOnline());$('#import-offline').addEventListener('click',()=>{closeModal();offerLocalImport();});
 }
 function openRenameOnline(){const name=state.members.find(m=>m.user_id===meId())?.display_name||'';showModal('Namen ändern','ACCOUNT / PROFILE',`<form class="edit-form" id="rename-form">${formField('Name',`<input name="name" required maxlength="40" value="${escapeHTML(name)}" />`)}<button class="btn btn-primary" type="submit">Speichern</button></form>`);$('#rename-form').addEventListener('submit',async e=>{e.preventDefault();const name=String(new FormData(e.currentTarget).get('name')).trim();if(!name)return;const {error}=await state.client.from('team_members').update({display_name:name}).eq('team_id',state.team.id).eq('user_id',meId());if(error){toast(error.message);return;}await fetchTeamData();closeModal();toast('Name gespeichert');});}
+
+
+function demoToImport(){
+  let d;try{d=JSON.parse(localStorage.getItem(demoKey)||'null');}catch{}
+  return {events:(d?.events||[]).filter(e=>e?.title&&e?.starts_at&&e?.ends_at&&!['Gemeinsamer Team-Check','Ideenrunde'].includes(e.title)),
+          tasks:(d?.tasks||[]).filter(t=>t?.title&&!['Team-Treffen vorbereiten','Termine eintragen','Gruppe einrichten'].includes(t.title))};
+}
+function offerLocalImport(){
+  if(!state.user||!state.team||state.mode!=='cloud')return;
+  const key='redline-import-'+state.user.id+'-'+state.team.id;
+  if(localStorage.getItem(key)==='done')return;
+  const d=demoToImport();if(!d.events.length&&!d.tasks.length)return;
+  showModal('Alte Termine übernehmen','KALENDER / IMPORT',`<p class="small-help">Auf diesem Handy liegen noch ${d.events.length} Termine und ${d.tasks.length} Aufgaben aus der Demo. Du kannst sie jetzt für dein Team freigeben. Sie werden dir zugeordnet und danach für alle Teammitglieder sichtbar.</p><div class="choice-buttons"><button type="button" id="confirm-import">Jetzt übernehmen</button><button type="button" id="skip-import">Später</button></div>`);
+  $('#skip-import').addEventListener('click',closeModal);
+  $('#confirm-import').addEventListener('click',async()=>{
+    const b=$('#confirm-import');b.disabled=true;
+    try{
+      if(d.events.length){
+        const entries=d.events.map(e=>({team_id:state.team.id,created_by:state.user.id,assigned_to:state.user.id,title:String(e.title).slice(0,90),details:String(e.details||'').slice(0,1200),starts_at:new Date(e.starts_at).toISOString(),ends_at:new Date(e.ends_at).toISOString(),reminder_minutes:[0,5,15,30,60,1440].includes(+e.reminder_minutes)?+e.reminder_minutes:15}));
+        const {error}=await state.client.from('team_events').insert(entries);if(error)throw error;
+      }
+      if(d.tasks.length){
+        const entries=d.tasks.map(t=>({team_id:state.team.id,created_by:state.user.id,assigned_to:state.user.id,title:String(t.title).slice(0,110),details:String(t.details||'').slice(0,1200),due_at:t.due_at?new Date(t.due_at).toISOString():null,priority:['low','medium','high'].includes(t.priority)?t.priority:'medium',status:['todo','doing','done'].includes(t.status)?t.status:'todo',reminder_minutes:[0,5,15,30,60,1440].includes(+t.reminder_minutes)?+t.reminder_minutes:15}));
+        const {error}=await state.client.from('team_tasks').insert(entries);if(error)throw error;
+      }
+      localStorage.setItem(key,'done');await fetchTeamData();closeModal();toast('Deine alten Einträge sind jetzt im Team!');
+    }catch(err){b.disabled=false;toast('Import fehlgeschlagen: '+err.message);}
+  });
+}
 
 async function initializeCloud() {
   try{
@@ -370,8 +399,8 @@ async function loadUser(user) {
   const {data,error}=await state.client.from('team_members').select('team_id,display_name,redline_teams(id,name,invite_code,created_by)').eq('user_id',user.id);
   if(error){toast(`Teams konnten nicht geladen werden: ${error.message}`);return;}
   const teams=(data||[]).map(row=>row.redline_teams).filter(Boolean);
-  if(!teams.length){state.team=null;state.members=[];state.events=[];state.tasks=[];render();openTeamChoice([]);return;}
-  const chosen=teams.find(t=>t.id===localStorage.getItem(teamKey))||teams[0];await selectTeam(chosen);closeModal();
+  if(!teams.length){state.team=null;state.members=[];state.events=[];state.tasks=[];render();if(pendingJoinCode)openJoinTeam(pendingJoinCode);else openTeamChoice([]);return;}
+  const chosen=teams.find(t=>t.id===localStorage.getItem(teamKey))||teams[0];await selectTeam(chosen);if(pendingJoinCode)openJoinTeam(pendingJoinCode);else {closeModal();setTimeout(offerLocalImport,300);}
 }
 async function selectTeam(team){state.team=team;localStorage.setItem(teamKey,team.id);await fetchTeamData();subscribeToChanges();}
 async function fetchTeamData(silent=false) {
@@ -401,7 +430,8 @@ function subscribeToChanges() {
 function openLogin() {
   showModal('Dein Team wartet.','LOGIN / REDLINE',`<p class="small-help">Melde dich mit deiner E-Mail an. Du bekommst einen sicheren Anmeldelink. Noch kein Team? Nach dem Login kannst du eines erstellen.</p><form id="login-form" class="edit-form">${formField('E-Mail-Adresse',`<input type="email" name="email" autocomplete="email" required placeholder="du@beispiel.de" />`)}<button class="btn btn-primary" type="submit">Anmeldelink schicken ↗</button></form><p class="auth-info">Es wird kein Passwort auf dieser Website gespeichert. Dein Team ist nur für eingeladene Mitglieder sichtbar.</p>`);
   $('#login-form').addEventListener('submit',async e=>{e.preventDefault();const form=e.currentTarget,email=String(new FormData(form).get('email')).trim();markBusy(form,true);
-    try{const {error}=await state.client.auth.signInWithOtp({email,options:{emailRedirectTo:location.href.split('#')[0]}});if(error)throw error;showModal('Schau in dein Postfach','LOGIN / REDLINE',`<p class="small-help">Wir haben einen Anmeldelink an <strong>${escapeHTML(email)}</strong> geschickt. Öffne den Link auf dem Gerät, auf dem du REDLINE benutzen möchtest.</p><button id="back-to-login" class="btn btn-secondary">Andere E-Mail nutzen</button>`);$('#back-to-login').addEventListener('click',openLogin);}
+    try{const {error}=await state.client.auth.signInWithOtp({email,options:{emailRedirectTo:location.href.split('#')[0]}});if(error)throw error;showModal('Schau in dein Postfach','LOGIN / REDLINE',`<p class="small-help">Wir haben einen Anmeldelink an <strong>${escapeHTML(email)}</strong> geschickt. Öffne den Link auf dem Gerät, auf dem du REDLINE benutzen möchtest.</p><button id="back-to-login" class="btn btn-secondary">Andere E-Mail nutzen</button><p class="small-help" style="margin-top:16px">Falls der E-Mail-Link nicht direkt zu REDLINE führt: Kopiere den vollständigen Anmeldelink aus deiner E-Mail und füge ihn hier ein. Teile ihn niemals mit anderen.</p><form id="verify-email-link" class="edit-form"><input type="url" name="link" required placeholder="Anmeldelink aus E-Mail einfügen" /><button class="btn btn-primary" type="submit">Anmelden ↗</button></form>`);$('#back-to-login').addEventListener('click',openLogin);
+      $('#verify-email-link').addEventListener('submit',async e=>{e.preventDefault();const form=e.currentTarget;try{const link=new URL(String(new FormData(form).get('link')).trim());if(link.origin!==SUPABASE_URL||link.pathname!=='/auth/v1/verify')throw Error('Ungültige Adresse');const token=link.searchParams.get('token')||link.searchParams.get('token_hash');const type=link.searchParams.get('type');if(!token||!['magiclink','signup','email','invite'].includes(type))throw Error('Dieser Anmeldelink ist ungültig');markBusy(form,true);const {error}=await state.client.auth.verifyOtp({token_hash:token,type});if(error)throw error;toast('Anmeldung erfolgreich');}catch(err){toast('Link konnte nicht bestätigt werden: '+err.message);markBusy(form,false);}});}
     catch(err){toast(`Anmelden fehlgeschlagen: ${err.message}`);markBusy(form,false);}
   });
 }
@@ -409,14 +439,14 @@ async function openTeamChoice(knownTeams=null){
   let teams=knownTeams;
   if(!teams){const {data,error}=await state.client.from('team_members').select('redline_teams(id,name,invite_code,created_by)').eq('user_id',meId());if(error){toast(error.message);return;}teams=(data||[]).map(x=>x.redline_teams).filter(Boolean);}
   showModal('Dein Team Space','TEAM / SETUP',`${teams.length?`<div class="team-selector">${teams.map(t=>`<button type="button" data-select-team="${escapeHTML(t.id)}">${escapeHTML(t.name)}<small>Team öffnen ↗</small></button>`).join('')}</div>`:''}<p class="small-help">Erstelle einen neuen gemeinsamen Space oder tritt mit einem Einladungscode bei.</p><div class="choice-buttons"><button id="choice-create">+ Team erstellen</button><button id="choice-join">↗ Code eingeben</button></div>`);
-  $$('[data-select-team]').forEach(btn=>btn.addEventListener('click',async()=>{const t=teams.find(x=>x.id===btn.dataset.selectTeam);if(!t)return;await selectTeam(t);closeModal();}));
+  $$('[data-select-team]').forEach(btn=>btn.addEventListener('click',async()=>{const t=teams.find(x=>x.id===btn.dataset.selectTeam);if(!t)return;await selectTeam(t);closeModal();setTimeout(offerLocalImport,300);}));
   $('#choice-create').addEventListener('click',()=>openCreateTeam());$('#choice-join').addEventListener('click',()=>openJoinTeam());
 }
 function openCreateTeam(){showModal('Team erstellen','TEAM / CREATE',`<form class="edit-form" id="create-team-form">${formField('Teamname',`<input name="team_name" required maxlength="60" placeholder="z. B. Unsere Crew" />`)}${formField('Dein Anzeigename',`<input name="display_name" required maxlength="40" placeholder="Wie sollen die anderen dich nennen?" />`)}<button class="btn btn-primary" type="submit">Space erstellen ↗</button></form>`);
   $('#create-team-form').addEventListener('submit',async e=>{e.preventDefault();const form=e.currentTarget,fd=new FormData(form);markBusy(form,true);const {error}=await state.client.rpc('create_team',{p_name:String(fd.get('team_name')).trim(),p_display_name:String(fd.get('display_name')).trim()});markBusy(form,false);if(error){toast(error.message);return;}await loadUser(state.user);toast('Team erstellt! Jetzt Einladungscode teilen.');});
 }
-function openJoinTeam(){showModal('Team beitreten','TEAM / JOIN',`<form class="edit-form" id="join-team-form">${formField('Einladungscode',`<input name="code" required maxlength="40" autocomplete="off" placeholder="Code aus dem Team" />`)}${formField('Dein Anzeigename',`<input name="display_name" required maxlength="40" placeholder="Dein Name im Team" />`)}<button class="btn btn-primary" type="submit">Team beitreten ↗</button></form>`);
-  $('#join-team-form').addEventListener('submit',async e=>{e.preventDefault();const form=e.currentTarget,fd=new FormData(form);markBusy(form,true);const {data,error}=await state.client.rpc('join_team',{p_code:String(fd.get('code')).trim(),p_display_name:String(fd.get('display_name')).trim()});markBusy(form,false);if(error){toast(error.message);return;}if(data)localStorage.setItem(teamKey,data);await loadUser(state.user);toast('Du bist jetzt Mitglied im Team');});
+function openJoinTeam(code=''){showModal('Team beitreten','TEAM / JOIN',`<form class="edit-form" id="join-team-form">${formField('Einladungscode',`<input name="code" required maxlength="40" autocomplete="off" placeholder="Code aus dem Team" value="${escapeHTML(code)}" />`)}${formField('Dein Anzeigename',`<input name="display_name" required maxlength="40" placeholder="Dein Name im Team" />`)}<button class="btn btn-primary" type="submit">Team beitreten ↗</button></form>`);
+  $('#join-team-form').addEventListener('submit',async e=>{e.preventDefault();const form=e.currentTarget,fd=new FormData(form);markBusy(form,true);const {data,error}=await state.client.rpc('join_team',{p_code:String(fd.get('code')).trim(),p_display_name:String(fd.get('display_name')).trim()});markBusy(form,false);if(error){toast(error.message);return;}if(data)localStorage.setItem(teamKey,data);pendingJoinCode='';if(new URL(location.href).searchParams.has('join'))history.replaceState({},'',location.pathname+location.hash);await loadUser(state.user);toast('Du bist jetzt Mitglied im Team');});
 }
 
 function bindUI() {
