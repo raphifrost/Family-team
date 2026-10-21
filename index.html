@@ -15,9 +15,28 @@
 
 .icon-btn svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 
+
+/* REDLINE Family 2.0 */
+:root{--bg:#080b16;--panel:#121a2a;--panel2:#1b2639;--border:#34425c;--soft:#1b2940;--red:#ff637c;--red-dark:#782f50;--glass:rgba(21,32,52,.83)}
+body{background:radial-gradient(ellipse at 80% 0%,#243452 0%,transparent 38%),radial-gradient(ellipse at 5% 45%,#2b193c 0%,transparent 45%),#080b16}
+.site-header{backdrop-filter:blur(16px)}.metric,.member-column,.task-card,.panel,.feature-card{box-shadow:0 18px 45px #0003;border-color:#34425c!important}
+.btn-primary,.nav-link.active{background:linear-gradient(125deg,#fa527a,#8b6af5)!important;box-shadow:0 6px 30px #a6539c44}
+.orb{background:radial-gradient(circle at 30% 20%,#e4d0ff,#9a69f8 18%,#452b91 50%,#0a102b 80%);box-shadow:0 0 95px #9a69f855}
+.orb-glow{background:#8059fa}.brand-dot,.title-red,.tiny-red{color:#ff789c}
+.family-launch{position:fixed;inset:0;z-index:99999;background:radial-gradient(ellipse at 50% 40%,#272450 0%,#080c1a 65%);display:flex;align-items:center;justify-content:center;padding:24px;transition:opacity .5s ease}
+.family-launch.out{opacity:0;pointer-events:none}
+.launch-inner{width:min(450px,100%);text-align:center}.launch-symbol{font-size:60px;filter:drop-shadow(0 0 24px #ad7bff);animation:launchFloat 2s ease-in-out infinite alternate}
+@keyframes launchFloat{to{transform:translateY(-12px)}}
+.launch-inner h1{font-family:var(--display);font-size:clamp(35px,8vw,64px);margin:20px 0 8px;letter-spacing:-2px}.launch-inner p{color:#a9b8d1}
+.launch-track{height:10px;background:#25314b;border-radius:50px;overflow:hidden;margin-top:28px}.launch-progress{width:0%;height:100%;background:linear-gradient(90deg,#fa527a,#9c83ff,#59d9ec);box-shadow:0 0 20px #a58bff;transition:width .09s linear}
+.launch-number{font-size:34px;font-weight:800;margin-top:16px;font-variant-numeric:tabular-nums}
+.family-fab{position:fixed;right:18px;bottom:22px;z-index:90;border:1px solid #8b77d0;background:linear-gradient(135deg,#433a8a,#bd547f);color:#fff;padding:15px 20px;border-radius:40px;box-shadow:0 15px 35px #0009;font-weight:800}
+.pet-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:9px}.pet-option{border:1px solid #45506a;border-radius:14px;background:#20283d;padding:10px 4px;color:white;display:flex;flex-direction:column;align-items:center;gap:4px;font-size:10px}.pet-option span{font-size:28px}.pet-option.selected{border-color:#c69aff;background:#403059}
+.family-pet{font-size:65px;text-align:center;min-height:80px}.family-pet img{max-width:110px;max-height:110px;object-fit:cover;border-radius:20px}.family-tabs{display:flex;gap:8px;margin:15px 0;flex-wrap:wrap}.family-tabs button{border:1px solid #46506a;background:#222a3d;color:#fff;border-radius:20px;padding:10px 13px}.family-tabs button.selected{background:#7255b9}
+.family-message{background:#1b2740;border-radius:14px;padding:12px;margin:8px 0}.family-message small{color:#a9bad1;display:block;margin-bottom:4px}
 </style>
 </head>
-<body>
+<body><div class="family-launch" id="family-launch" role="status" aria-label="REDLINE startet"><div class="launch-inner"><div class="launch-symbol">✦</div><h1>Willkommen bei <span style="color:#bc9bff">REDLINE</span></h1><p>Euer Zuhause für Termine, Aufgaben und gemeinsame Momente</p><div class="launch-track"><div class="launch-progress" id="launch-progress"></div></div><div class="launch-number" id="launch-number">0%</div><p>Dein Family Space wird vorbereitet</p></div></div><button type="button" class="family-fab" id="family-fab">🐾 Mein Family Space</button>
   <div class="ambient ambient-1" aria-hidden="true"></div>
   <div class="ambient ambient-2" aria-hidden="true"></div>
   <div id="app">
@@ -470,6 +489,40 @@ function bindUI() {
   window.addEventListener('keydown',e=>{if(e.key==='Escape'&&!(state.mode==='cloud'&&!state.user))closeModal();});
   $$('.nav-link').forEach(a=>a.addEventListener('click',()=>{$$('.nav-link').forEach(el=>el.classList.toggle('active',el===a));}));
 }
+
+
+/* Family Space Erweiterung – lokale Haustiere und sichere UI */
+const familyPetChoices=[['Hund','🐶'],['Katze','🐱'],['Hase','🐰'],['Fuchs','🦊'],['Wolf','🐺'],['Tiger','🐯'],['Löwe','🦁'],['Panda','🐼'],['Bär','🐻'],['Koala','🐨'],['Affe','🐵'],['Frosch','🐸'],['Pinguin','🐧'],['Eule','🦉'],['Papagei','🦜'],['Delfin','🐬'],['Schildkröte','🐢'],['Drache','🐉'],['Einhorn','🦄'],['Hamster','🐹']];
+const familyStoreKey=()=> 'redline-family-space-'+(meId()||'guest');
+function familyRead(){try{return JSON.parse(localStorage.getItem(familyStoreKey()))||{}}catch{return {}}}
+function familyWrite(v){try{localStorage.setItem(familyStoreKey(),JSON.stringify(v));return true}catch{toast('Speicher voll: Bitte ein kleineres Bild wählen');return false}}
+function familyModal(tab='pet'){
+ const saved=familyRead(),pet=saved.pet||'🐶';
+ const tabs='<div class="family-tabs"><button data-family-tab="pet" class="'+(tab==='pet'?'selected':'')+'">🐾 Haustier</button><button data-family-tab="settings" class="'+(tab==='settings'?'selected':'')+'">⚙️ Einstellungen</button><button data-family-tab="chat" class="'+(tab==='chat'?'selected':'')+'">💬 Nachrichten</button></div>';
+ let body='';
+ if(tab==='pet'){
+ body='<div class="family-pet">'+(saved.image?'<img alt="Dein Haustier" src="'+escapeHTML(saved.image)+'">':pet)+'</div><p class="small-help">Wähle eines von 20 Haustieren oder lade ein eigenes Foto hoch. Dein Haustier bleibt auf diesem Gerät gespeichert.</p><div class="pet-grid">'+familyPetChoices.map(([name,emoji])=>'<button class="pet-option '+(!saved.image&&pet===emoji?'selected':'')+'" data-pet="'+emoji+'"><span>'+emoji+'</span>'+name+'</button>').join('')+'</div><p style="margin-top:18px"><label>Eigenes Haustierfoto auswählen <input id="family-pet-upload" type="file" accept="image/*"></label></p>';
+ }else if(tab==='settings'){
+ body='<p class="small-help">Deine persönlichen Einstellungen gelten auf diesem Gerät.</p><label class="field">Dein Haustiername<input id="family-pet-name" maxlength="30" placeholder="z. B. Luna" value="'+escapeHTML(saved.petName||'')+'"></label><label class="field">Begrüßung<input id="family-greeting" maxlength="80" placeholder="Schön, dass du da bist!" value="'+escapeHTML(saved.greeting||'')+'"></label><button id="family-settings-save" class="btn btn-primary">Einstellungen speichern</button><p class="small-help" style="margin-top:14px">Für geräteübergreifende private Chats und Push-Mitteilungen braucht REDLINE eine gesicherte Server-Erweiterung.</p>';
+ }else{
+ body='<p class="auth-info">Private Nachrichten sind noch nicht freigeschaltet. Damit nur die ausgewählte Person sie lesen kann, müssen zunächst eine eigene Nachrichten-Datenbank und Zugriffsregeln eingerichtet werden. Bis dahin werden keine scheinbar privaten Nachrichten gespeichert oder versendet.</p><p class="small-help">Die bisherigen Kalender- und Aufgabenfunktionen bleiben verfügbar.</p>';
+ }
+ showModal('Dein Family Space','REDLINE / FAMILY',tabs+body);
+ document.querySelectorAll('[data-family-tab]').forEach(b=>b.onclick=()=>familyModal(b.dataset.familyTab));
+ if(tab==='pet'){
+ document.querySelectorAll('[data-pet]').forEach(b=>b.onclick=()=>{const d=familyRead();d.pet=b.dataset.pet;delete d.image;familyWrite(d);familyModal('pet');toast('Haustier ausgewählt!')});
+ document.getElementById('family-pet-upload').onchange=async e=>{
+ const file=e.target.files?.[0];if(!file)return;if(!file.type.startsWith('image/')){toast('Bitte ein Bild auswählen');return}
+ const img=new Image(),url=URL.createObjectURL(file);
+ img.onload=()=>{const c=document.createElement('canvas'),max=400,scale=Math.min(1,max/Math.max(img.width,img.height));c.width=Math.round(img.width*scale);c.height=Math.round(img.height*scale);c.getContext('2d').drawImage(img,0,0,c.width,c.height);URL.revokeObjectURL(url);const d=familyRead();d.image=c.toDataURL('image/jpeg',.75);if(familyWrite(d)){familyModal('pet');toast('Dein eigenes Haustier ist da!')}};
+ img.onerror=()=>{URL.revokeObjectURL(url);toast('Bild konnte nicht geladen werden')};img.src=url;
+ };
+ }else if(tab==='settings'){
+ document.getElementById('family-settings-save').onclick=()=>{const d=familyRead();d.petName=document.getElementById('family-pet-name').value.trim();d.greeting=document.getElementById('family-greeting').value.trim();if(familyWrite(d))toast('Einstellungen gespeichert')};
+ }
+}
+document.getElementById('family-fab').addEventListener('click',()=>familyModal());
+(function launch(){const start=performance.now(),duration=5000,bar=document.getElementById('launch-progress'),num=document.getElementById('launch-number'),overlay=document.getElementById('family-launch');function frame(now){const p=Math.min(100,Math.floor((now-start)/duration*100));bar.style.width=p+'%';num.textContent=p+'%';if(p<100)requestAnimationFrame(frame);else{bar.style.width='100%';num.textContent='100%';setTimeout(()=>{overlay.classList.add('out');setTimeout(()=>overlay.remove(),550)},150)}}requestAnimationFrame(frame)})();
 
 bindUI();
 if(isConfigured) initializeCloud(); else loadDemo();
